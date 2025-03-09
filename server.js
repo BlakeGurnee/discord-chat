@@ -2,7 +2,11 @@ const express = require('express');
 const { Client, GatewayIntentBits } = require('discord.js');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const mongoose = require('mongoose'); // Mongoose for MongoDB
+const mongoose = require('mongoose');
+
+// Set the strictQuery option to true if you want to suppress the warning
+mongoose.set('strictQuery', true);
+
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -22,9 +26,13 @@ const bot = new Client({
 bot.login(process.env.BOT_TOKEN);
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log("Connected to MongoDB");
+  })
+  .catch(err => {
+    console.error("Error connecting to MongoDB:", err);
+  });
 
 // Define User Schema for MongoDB
 const userSchema = new mongoose.Schema({
