@@ -4,90 +4,126 @@ const cors = require("cors");
 
 const app = express();
 
-// Enhanced CORS Configuration
+// ========== CORS CONFIGURATION ========== //
+const allowedOrigins = ["https://studyhall-help.netlify.app"];
+
 const corsOptions = {
-  origin: "https://studyhall-help.netlify.app",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  origin: function (origin, callback) {
+    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type,Authorization",
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 204
 };
 
 // Apply CORS middleware first
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions)); // Handle all OPTIONS requests
 
-// Add security headers middleware
+// Manual header injection for security
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "https://studyhall-help.netlify.app");
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   next();
 });
 
-app.use(express.json());
-
-// Discord Client with error handling
+// ========== DISCORD BOT SETUP ========== //
 const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.MessageHistory
+  ],
+  presence: {
+    status: "online",
+    activities: [{
+      name: "StudyHall Chat",
+      type: "WATCHING"
+    }]
+  }
 });
 
-bot.login(process.env.BOT_TOKEN)
-  .then(() => console.log("Discord bot connected"))
-  .catch(error => console.error("Discord login failed:", error));
+// Bot connection handlers
+bot.on("ready", () => {
+  console.log(`✅ Bot connected as ${bot.user.tag}`);
+  console.log(`🌍 Serving ${bot.guilds.cache.size} servers`);
+});
 
-// Message storage with TTL (1 hour)
-const webMessages = new Map();
-const MESSAGE_TTL = 3600000; // 1 hour
+bot.on("error", error => {
+  console.error("🔴 Discord client error:", error);
+  process.exit(1); // Restart on critical errors
+});
 
-// Message processing with validation
-const processMessages = (discordMessages, channelId) => {
+// Login with validation
+const startBot = async () => {
   try {
-    // Clean up old messages
-    const now = Date.now();
-    const webMessagesForChannel = (webMessages.get(channelId) || [])
-      .filter(msg => now - msg.timestamp < MESSAGE_TTL);
-
-    webMessages.set(channelId, webMessagesForChannel);
-
-    // Process Discord messages
-    const discordArray = Array.from(discordMessages.values());
-    const formattedDiscord = discordArray.map(msg => ({
-      username: msg.author?.username || 'System',
-      content: msg.content,
-      avatar: msg.author?.displayAvatarURL({ dynamic: true }) || '',
-      timestamp: msg.createdTimestamp,
-      source: 'discord'
-    }));
-
-    // Combine messages
-    return [
-      ...webMessagesForChannel,
-      ...formattedDiscord
-    ].sort((a, b) => b.timestamp - a.timestamp);
+    await bot.login(process.env.BOT_TOKEN);
+    console.log("🔑 Bot authentication successful");
   } catch (error) {
-    console.error("Message processing error:", error);
-    return [];
+    console.error("🔴 Bot login failed:", error);
+    process.exit(1);
   }
 };
 
-// API Endpoints with improved error handling
+// ========== APPLICATION LOGIC ========== //
+app.use(express.json());
+
+// Message storage with validation
+const messageStore = new Map();
+const MESSAGE_TTL = 3600000; // 1 hour
+
+const validateChannel = async (channelId) => {
+  const channel = await bot.channels.fetch(channelId);
+  if (!channel) throw new Error("Channel not found");
+  if (!channel.isTextBased()) throw new Error("Invalid channel type");
+  return channel;
+};
+
+// API Endpoints
+app.get("/health", (req, res) => {
+  res.json({
+    status: "OK",
+    botStatus: bot.isReady() ? "online" : "offline",
+    guildCount: bot.guilds.cache.size
+  });
+});
+
 app.get("/messages/:channelId", async (req, res) => {
   try {
-    const channel = await bot.channels.fetch(req.params.channelId);
-    if (!channel) {
-      return res.status(404).json({ error: "Channel not found" });
-    }
+    const channel = await validateChannel(req.params.channelId);
+    const discordMessages = await channel.messages.fetch({ limit: 50 });
+    
+    // Clean old messages
+    const now = Date.now();
+    const webMessages = (messageStore.get(req.params.channelId) || [])
+      .filter(msg => now - msg.timestamp < MESSAGE_TTL);
+    
+    messageStore.set(req.params.channelId, webMessages);
 
-    const messages = await channel.messages.fetch({ limit: 50 });
-    res.json(processMessages(messages, req.params.channelId));
+    // Format response
+    const formattedMessages = [
+      ...webMessages,
+      ...Array.from(discordMessages.values()).map(msg => ({
+        id: msg.id,
+        username: msg.author.username,
+        content: msg.content,
+        avatar: msg.author.displayAvatarURL({ size: 256 }),
+        timestamp: msg.createdTimestamp,
+        source: "discord"
+      }))
+    ].sort((a, b) => b.timestamp - a.timestamp);
+
+    res.json(formattedMessages);
   } catch (error) {
-    console.error("GET /messages error:", error.message);
-    res.status(500).json({ 
+    console.error("GET Error:", error.message);
+    res.status(500).json({
       error: "Failed to load messages",
       details: error.message
     });
@@ -98,52 +134,42 @@ app.post("/send", async (req, res) => {
   try {
     const { channelId, content, username } = req.body;
     
-    // Validate input
-    const errors = [];
-    if (!channelId) errors.push("Missing channel ID");
-    if (!content?.trim()) errors.push("Message content required");
-    if (!username?.trim()) errors.push("Username required");
-    
-    if (errors.length > 0) {
-      return res.status(400).json({ errors });
+    // Validation
+    if (!channelId || !content?.trim() || !username?.trim()) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Store web message
-    if (!webMessages.has(channelId)) {
-      webMessages.set(channelId, []);
+    const channel = await validateChannel(channelId);
+    
+    // Store message
+    if (!messageStore.has(channelId)) {
+      messageStore.set(channelId, []);
     }
     
-    webMessages.get(channelId).push({
+    messageStore.get(channelId).push({
       username: username.trim(),
       content: content.trim(),
       timestamp: Date.now(),
       avatar: "https://cdn.discordapp.com/embed/avatars/0.png",
-      source: 'web'
+      source: "web"
     });
 
     // Send to Discord
-    const channel = await bot.channels.fetch(channelId);
     await channel.send(`**${username}**: ${content}`);
     
     res.json({ success: true });
   } catch (error) {
-    console.error("POST /send error:", error.message);
-    res.status(500).json({ 
+    console.error("POST Error:", error.message);
+    res.status(500).json({
       error: "Message failed to send",
       details: error.message
     });
   }
 });
 
-// Health check with CORS headers
-app.get("/health", (req, res) => {
-  res.setHeader("Content-Type", "text/plain");
-  res.send("OK");
-});
-
-// Server setup
+// ========== SERVER START ========== //
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log("CORS configured for:", corsOptions.origin);
+  console.log(`🚀 Server running on port ${PORT}`);
+  startBot();
 });
