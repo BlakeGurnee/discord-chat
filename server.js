@@ -4,20 +4,18 @@ const cors = require("cors");
 
 const app = express();
 
-// Improved CORS configuration
+// Enhanced CORS configuration
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "https://studyhall-help.netlify.app"  // Removed trailing slash and path
+    "https://studyhall-help.netlify.app"
   ],
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
 }));
 
-// Handle preflight requests
-app.options("*", cors());
-
+app.options("*", cors()); // Handle preflight requests
 app.use(express.json());
 
 const bot = new Client({
@@ -32,30 +30,37 @@ bot.login(process.env.BOT_TOKEN);
 
 const webMessages = new Map();
 
+// Improved message merging with error handling
 const mergeMessages = (discordMessages, webMessages, channelId) => {
-  const formattedDiscord = discordMessages.map(msg => ({
-    username: msg.author.username,
-    content: msg.content,
-    avatar: msg.author.displayAvatarURL(),
-    timestamp: msg.createdTimestamp
-  }));
+  try {
+    const discordArray = Array.from(discordMessages.values());
+    
+    const formattedDiscord = discordArray.map(msg => ({
+      username: msg.author?.username || 'Unknown',
+      content: msg.content,
+      avatar: msg.author?.displayAvatarURL() || '',
+      timestamp: msg.createdTimestamp || Date.now()
+    }));
 
-  const formattedWeb = webMessages.has(channelId) 
-    ? webMessages.get(channelId)
-    : [];
-
-  return [...formattedDiscord, ...formattedWeb].sort(
-    (a, b) => b.timestamp - a.timestamp
-  );
+    const formattedWeb = webMessages.get(channelId) || [];
+    
+    return [...formattedWeb, ...formattedDiscord].sort(
+      (a, b) => b.timestamp - a.timestamp
+    );
+  } catch (error) {
+    console.error('Message merging error:', error);
+    return [];
+  }
 };
 
 app.get("/messages/:channelId", async (req, res) => {
   try {
     const channel = await bot.channels.fetch(req.params.channelId);
-    const discordMessages = await channel.messages.fetch({ limit: 20 });
-    res.json(mergeMessages(discordMessages, webMessages, req.params.channelId));
+    const messages = await channel.messages.fetch({ limit: 20 });
+    res.json(mergeMessages(messages, webMessages, req.params.channelId));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('GET /messages error:', error);
+    res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
 
@@ -83,7 +88,8 @@ app.post("/send", async (req, res) => {
     
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('POST /send error:', error);
+    res.status(500).json({ error: "Failed to send message" });
   }
 });
 
