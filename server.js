@@ -2,6 +2,16 @@ const express = require('express');
 const { Client, GatewayIntentBits } = require('discord.js');
 const cors = require('cors');
 
+// 1. FIXED INTENTS CONFIG
+const bot = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageHistory // CORRECT INTENT NAME
+  ]
+});
+
 const app = express();
 
 // CORS Configuration
@@ -10,16 +20,6 @@ app.use(cors({
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-// Discord Client Configuration
-const bot = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMessageHistory
-  ]
-});
 
 // Bot Connection Handlers
 bot.on('ready', () => {
