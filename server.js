@@ -29,7 +29,7 @@ app.post('/register', (req, res) => {
     if (users[username]) {
       return res.status(400).json({ error: "Username already taken" });
     }
-    // In production, hash passwords!
+    // In production, always hash passwords!
     users[username] = { 
       password, 
       profilePic: profilePic || "https://cdn.discordapp.com/embed/avatars/1.png",
@@ -38,6 +38,23 @@ app.post('/register', (req, res) => {
     res.json({ success: true, message: "User registered successfully" });
   } catch (error) {
     console.error("Error in /register:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Login endpoint
+app.post('/login', (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!users[username]) {
+      return res.status(400).json({ error: "Account not found" });
+    }
+    if (users[username].password !== password) {
+      return res.status(400).json({ error: "Incorrect password" });
+    }
+    res.json({ username, profilePic: users[username].profilePic, nickname: users[username].nickname });
+  } catch (error) {
+    console.error("Error in /login:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -104,6 +121,7 @@ app.get('/messages/:channelId', async (req, res) => {
     const channel = await bot.channels.fetch(req.params.channelId);
     const discordMessages = await channel.messages.fetch({ limit: 50 });
     
+    // Format Discord messages (ignoring bot messages)
     const formattedDiscord = Array.from(discordMessages.values())
       .filter(msg => !msg.author.bot)
       .map(msg => ({
@@ -122,7 +140,6 @@ app.get('/messages/:channelId', async (req, res) => {
     ].sort((a, b) => a.timestamp - b.timestamp);
 
     res.json(allMessages);
-    
   } catch (error) {
     console.error("Error in /messages:", error);
     res.status(500).json({ error: error.message });
@@ -137,7 +154,7 @@ app.post('/send', async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
     
-    // Use user's profile picture if available
+    // Look up the user's profile to get the correct avatar
     let avatarUrl = "https://cdn.discordapp.com/embed/avatars/0.png";
     if (users[username] && users[username].profilePic) {
       avatarUrl = users[username].profilePic;
@@ -161,7 +178,6 @@ app.post('/send', async (req, res) => {
     await channel.send(`${username}: ${content}`);
     
     res.json({ success: true });
-    
   } catch (error) {
     console.error("Error in /send:", error);
     res.status(500).json({ error: error.message });
