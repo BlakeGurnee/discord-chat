@@ -1,22 +1,31 @@
+// server.js - Updated CORS configuration
 const express = require("express");
 const { Client, GatewayIntentBits } = require("discord.js");
 const cors = require("cors");
 
 const app = express();
 
-// CORS Configuration
+// Enhanced CORS configuration
 const corsOptions = {
   origin: "https://studyhall-help.netlify.app",
-  methods: "GET,HEAD,POST,OPTIONS",
-  allowedHeaders: "Content-Type,Authorization",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
-  optionsSuccessStatus: 200
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
-// Middleware
+// Apply CORS first
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions)); // Preflight handling
-app.use(express.json());
+app.options("*", cors(corsOptions)); // Handle all OPTIONS requests
+
+// Add request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  res.header("Access-Control-Allow-Origin", "https://studyhall-help.netlify.app");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  next();
+});
 
 // Discord Client
 const bot = new Client({
