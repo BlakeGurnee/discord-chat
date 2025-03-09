@@ -240,6 +240,15 @@ app.post('/send', async (req, res) => {
   }
 });
 
+app.get('/view-users', (req, res) => {
+  try {
+    const users = loadUsers();
+    res.json(users); // Return the entire contents of users.json
+  } catch (error) {
+    res.status(500).json({ error: 'Error reading users data' });
+  }
+});
+
 // ** Start Server **
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
