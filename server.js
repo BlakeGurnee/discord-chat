@@ -35,6 +35,7 @@ bot.on('messageDelete', async (deletedMessage) => {
   }
 });
 
+// Get messages for a channel
 app.get('/messages/:channelId', async (req, res) => {
   try {
     const channel = await bot.channels.fetch(req.params.channelId);
@@ -69,6 +70,7 @@ app.get('/messages/:channelId', async (req, res) => {
   }
 });
 
+// Send a message
 app.post('/send', async (req, res) => {
   try {
     const { channelId, content, username } = req.body;
@@ -100,6 +102,29 @@ app.post('/send', async (req, res) => {
     
   } catch (error) {
     console.error("Error in /send:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete a message
+app.delete('/messages/:channelId/:messageId', async (req, res) => {
+  try {
+    const { channelId, messageId } = req.params;
+    
+    // Delete from web messages
+    if (messageStore.has(channelId)) {
+      const filtered = messageStore.get(channelId).filter(msg => msg.id !== messageId);
+      messageStore.set(channelId, filtered);
+    }
+
+    // Delete from Discord
+    const channel = await bot.channels.fetch(channelId);
+    const message = await channel.messages.fetch(messageId);
+    await message.delete();
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting message:", error);
     res.status(500).json({ error: error.message });
   }
 });
