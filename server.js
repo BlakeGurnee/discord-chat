@@ -4,17 +4,16 @@ const cors = require("cors");
 
 const app = express();
 
-// Configure CORS for production
+// Configure CORS for your Netlify frontend
 app.use(cors({
   origin: [
-    "http://localhost:3000", // Local development
-    "https://studyhall-help.netlify.app/" // Your Netlify URL
+    "http://localhost:3000",         // Local development
+    "https://studyhall-help.netlify.app/lessons/chat/"  // Your Netlify URL
   ]
 }));
 
 app.use(express.json());
 
-// Discord client setup
 const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -23,7 +22,7 @@ const bot = new Client({
   ]
 });
 
-// Use environment variable for bot token
+// Use environment variable from Render
 bot.login(process.env.BOT_TOKEN);
 
 // Message storage
@@ -62,12 +61,10 @@ app.post("/send", async (req, res) => {
   try {
     const { channelId, content, username } = req.body;
     
-    // Validate input
     if (!channelId || !content || !username) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Store web message
     if (!webMessages.has(channelId)) {
       webMessages.set(channelId, []);
     }
@@ -79,7 +76,6 @@ app.post("/send", async (req, res) => {
       avatar: "https://cdn.discordapp.com/embed/avatars/0.png"
     });
 
-    // Send to Discord
     const channel = await bot.channels.fetch(channelId);
     await channel.send(`**${username}**: ${content}`);
     
@@ -89,9 +85,7 @@ app.post("/send", async (req, res) => {
   }
 });
 
-// Health check endpoint
 app.get("/health", (req, res) => res.sendStatus(200));
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
