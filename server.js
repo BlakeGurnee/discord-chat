@@ -26,19 +26,23 @@ app.post('/register', (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ error: "Missing required fields" });
     }
+    
     if (users[username]) {
       return res.status(400).json({ error: "Username already taken" });
     }
-    // In production, always hash passwords!
+
     users[username] = { 
       password, 
       profilePic: profilePic || "https://cdn.discordapp.com/embed/avatars/1.png",
       nickname: ""
     };
+    
+    console.log(`New user registered: ${username}`);
     res.json({ success: true, message: "User registered successfully" });
+
   } catch (error) {
     console.error("Error in /register:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
