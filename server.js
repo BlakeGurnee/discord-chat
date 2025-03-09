@@ -3,7 +3,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const cors = require('cors');
 
 const app = express();
-app.use(cors({ origin: 'https://studyhall-help.netlify.app' }));
+app.use(cors({ origin: '*' })); // Temporarily allow all origins for debugging
 app.use(express.json());
 
 const bot = new Client({
@@ -21,6 +21,8 @@ const webMessages = new Map();
 
 app.get('/messages/:channelId', async (req, res) => {
   try {
+    console.log(`Fetching messages for channel ${req.params.channelId}`);
+    
     const channel = await bot.channels.fetch(req.params.channelId);
     const discordMessages = await channel.messages.fetch({ limit: 50 });
     
@@ -30,22 +32,29 @@ app.get('/messages/:channelId', async (req, res) => {
         username: msg.author.username,
         content: msg.content,
         avatar: msg.author.displayAvatarURL(),
-        origin: 'discord'
+        origin: 'discord',
+        timestamp: msg.createdTimestamp
       }));
 
     const webMessagesForChannel = webMessages.get(req.params.channelId) || [];
     
-    res.json([
-      ...webMessagesForChannel.map(m => ({ ...m, origin: 'web' })),
+    const allMessages = [
+      ...webMessagesForChannel,
       ...formattedDiscord
-    ].sort((a, b) => b.timestamp - a.timestamp));
+    ].sort((a, b) => b.timestamp - a.timestamp);
+
+    console.log(`Returning ${allMessages.length} messages`);
+    res.json(allMessages);
+    
   } catch (error) {
+    console.error("Error in /messages:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 app.post('/send', async (req, res) => {
   try {
+    console.log("Received message:", req.body);
     const { channelId, content, username } = req.body;
     
     if (!channelId || !content || !username) {
@@ -57,6 +66,7 @@ app.post('/send', async (req, res) => {
     webMessages.get(channelId).push({
       username,
       content,
+      origin: 'web',
       timestamp: Date.now(),
       avatar: "https://cdn.discordapp.com/embed/avatars/0.png"
     });
@@ -66,7 +76,9 @@ app.post('/send', async (req, res) => {
     await channel.send(`**${username}**: ${content}`);
     
     res.json({ success: true });
+    
   } catch (error) {
+    console.error("Error in /send:", error);
     res.status(500).json({ error: error.message });
   }
 });
