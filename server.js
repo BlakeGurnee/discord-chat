@@ -4,13 +4,19 @@ const cors = require("cors");
 
 const app = express();
 
-// Configure CORS for your Netlify frontend
+// Improved CORS configuration
 app.use(cors({
   origin: [
-    "http://localhost:3000",         // Local development
-    "https://studyhall-help.netlify.app/lessons/chat/"  // Your Netlify URL
-  ]
+    "http://localhost:3000",
+    "https://studyhall-help.netlify.app"  // Removed trailing slash and path
+  ],
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
 }));
+
+// Handle preflight requests
+app.options("*", cors());
 
 app.use(express.json());
 
@@ -22,13 +28,10 @@ const bot = new Client({
   ]
 });
 
-// Use environment variable from Render
 bot.login(process.env.BOT_TOKEN);
 
-// Message storage
 const webMessages = new Map();
 
-// Helper function to merge messages
 const mergeMessages = (discordMessages, webMessages, channelId) => {
   const formattedDiscord = discordMessages.map(msg => ({
     username: msg.author.username,
@@ -46,7 +49,6 @@ const mergeMessages = (discordMessages, webMessages, channelId) => {
   );
 };
 
-// Endpoints
 app.get("/messages/:channelId", async (req, res) => {
   try {
     const channel = await bot.channels.fetch(req.params.channelId);
