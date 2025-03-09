@@ -40,7 +40,7 @@ app.post('/register', (req, res) => {
     users[username] = { 
       password, 
       profilePic: profilePic || "https://cdn.discordapp.com/embed/avatars/1.png",
-      nickname: ""
+      nickname: ""  // Nickname starts empty
     };
 
     res.json({ success: true, message: "User registered successfully" });
@@ -66,7 +66,7 @@ app.post('/login', (req, res) => {
     res.json({ 
       username, 
       profilePic: users[username].profilePic, 
-      nickname: users[username].nickname 
+      nickname: users[username].nickname || username // Return the nickname or username if not set
     });
 
   } catch (error) {
@@ -85,7 +85,12 @@ app.get('/user/:username', (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json({ username, profilePic: user.profilePic, nickname: user.nickname });
+    // Show nickname if set, otherwise use username
+    res.json({ 
+      username: user.nickname || username, 
+      profilePic: user.profilePic, 
+      nickname: user.nickname || username // Return nickname if set, else username
+    });
 
   } catch (error) {
     console.error("Error in /user:", error);
@@ -93,7 +98,7 @@ app.get('/user/:username', (req, res) => {
   }
 });
 
-// ** UPDATE User Profile **
+// ** UPDATE User Profile (username, password, profilePic, nickname) **
 app.put('/user', (req, res) => {
   try {
     const { currentUsername, newUsername, newPassword, newProfilePic, newNickname } = req.body;
@@ -130,7 +135,7 @@ app.put('/user', (req, res) => {
       success: true, 
       username: updatedUsername, 
       profilePic: users[updatedUsername].profilePic, 
-      nickname: users[updatedUsername].nickname 
+      nickname: users[updatedUsername].nickname || updatedUsername // Return nickname if set, else use updated username
     });
 
   } catch (error) {
@@ -179,15 +184,19 @@ app.post('/send', async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Look up the user's profile to get the correct avatar
+    // Look up the user's profile to get the correct avatar and nickname
     let avatarUrl = "https://cdn.discordapp.com/embed/avatars/0.png";
+    let displayName = username;  // Default to username
     if (users[username] && users[username].profilePic) {
       avatarUrl = users[username].profilePic;
+    }
+    if (users[username] && users[username].nickname) {
+      displayName = users[username].nickname;  // Use nickname if set
     }
 
     const newMessage = {
       id: `web-${Date.now()}`,
-      username,
+      username: displayName,
       content,
       avatar: avatarUrl,
       timestamp: Date.now(),
@@ -200,7 +209,7 @@ app.post('/send', async (req, res) => {
     messageStore.get(channelId).push(newMessage);
 
     const channel = await bot.channels.fetch(channelId);
-    await channel.send(`${username}: ${content}`);
+    await channel.send(`${displayName}: ${content}`);
 
     res.json({ success: true });
   } catch (error) {
