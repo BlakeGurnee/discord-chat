@@ -14,8 +14,7 @@ const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.Attachments
+    GatewayIntentBits.MessageContent
   ]
 });
 
@@ -143,7 +142,7 @@ app.put('/user', (req, res) => {
 // ** Message Storage for Web Messages **
 const messageStore = new Map();
 
-// ** Fetch Messages **
+// ** FETCH Messages **
 app.get('/messages/:channelId', async (req, res) => {
   try {
     const channel = await bot.channels.fetch(req.params.channelId);
@@ -171,30 +170,13 @@ app.get('/messages/:channelId', async (req, res) => {
   }
 });
 
-// ** Send Message **
+// ** SEND Message **
 app.post('/send', async (req, res) => {
   try {
-    const { channelId, content, username, attachments } = req.body;
+    const { channelId, content, username } = req.body;
 
     if (!channelId || !content || !username) {
       return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    // Identify the image channel ID (replace with your actual channel ID)
-    const imageChannelId = '1348421097372123239';
-
-    // Check if the message is being sent to the image channel
-    if (channelId !== imageChannelId) {
-      return res.status(403).json({ error: "Images can only be posted in the images channel" });
-    }
-
-    // If there are attachments, check if they are images
-    if (attachments && attachments.length > 0) {
-      const attachment = attachments[0]; // Assuming only one attachment is sent per request
-      const isImage = attachment.url.match(/\.(jpg|jpeg|png|gif)$/i);
-      if (!isImage) {
-        return res.status(400).json({ error: "Only image files are allowed in this channel" });
-      }
     }
 
     // Look up the user's profile to get the correct avatar
@@ -211,10 +193,6 @@ app.post('/send', async (req, res) => {
       timestamp: Date.now(),
       source: 'web'
     };
-
-    if (attachments && attachments.length > 0) {
-      newMessage.attachment = attachments[0].url; // Add the image URL to the message
-    }
 
     if (!messageStore.has(channelId)) {
       messageStore.set(channelId, []);
