@@ -4,20 +4,21 @@ const cors = require("cors");
 
 const app = express();
 
-// Enhanced CORS configuration
-app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "https://studyhall-help.netlify.app"
-  ],
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
+// CORS Configuration
+const corsOptions = {
+  origin: "https://studyhall-help.netlify.app",
+  methods: "GET,HEAD,POST,OPTIONS",
+  allowedHeaders: "Content-Type,Authorization",
+  credentials: true,
+  optionsSuccessStatus: 200
+};
 
-app.options("*", cors()); // Handle preflight requests
+// Middleware
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // Preflight handling
 app.use(express.json());
 
+// Discord Client
 const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -28,39 +29,34 @@ const bot = new Client({
 
 bot.login(process.env.BOT_TOKEN);
 
+// Message Storage
 const webMessages = new Map();
 
-// Improved message merging with error handling
-const mergeMessages = (discordMessages, webMessages, channelId) => {
-  try {
-    const discordArray = Array.from(discordMessages.values());
-    
-    const formattedDiscord = discordArray.map(msg => ({
-      username: msg.author?.username || 'Unknown',
-      content: msg.content,
-      avatar: msg.author?.displayAvatarURL() || '',
-      timestamp: msg.createdTimestamp || Date.now()
-    }));
-
-    const formattedWeb = webMessages.get(channelId) || [];
-    
-    return [...formattedWeb, ...formattedDiscord].sort(
-      (a, b) => b.timestamp - a.timestamp
-    );
-  } catch (error) {
-    console.error('Message merging error:', error);
-    return [];
-  }
+// Message Processing
+const processMessages = (discordMessages, channelId) => {
+  const discordArray = Array.from(discordMessages.values());
+  const formattedDiscord = discordArray.map(msg => ({
+    username: msg.author?.username || 'Anonymous',
+    content: msg.content,
+    avatar: msg.author?.displayAvatarURL({ format: 'png', size: 256 }) || '',
+    timestamp: msg.createdTimestamp
+  }));
+  
+  return [
+    ...(webMessages.get(channelId) || []),
+    ...formattedDiscord
+  ].sort((a, b) => b.timestamp - a.timestamp);
 };
 
+// API Endpoints
 app.get("/messages/:channelId", async (req, res) => {
   try {
     const channel = await bot.channels.fetch(req.params.channelId);
-    const messages = await channel.messages.fetch({ limit: 20 });
-    res.json(mergeMessages(messages, webMessages, req.params.channelId));
+    const messages = await channel.messages.fetch({ limit: 50 });
+    res.json(processMessages(messages, req.params.channelId));
   } catch (error) {
-    console.error('GET /messages error:', error);
-    res.status(500).json({ error: "Failed to fetch messages" });
+    console.error('GET Error:', error);
+    res.status(500).json({ error: "Failed to load messages" });
   }
 });
 
@@ -68,14 +64,15 @@ app.post("/send", async (req, res) => {
   try {
     const { channelId, content, username } = req.body;
     
-    if (!channelId || !content || !username) {
+    // Validate input
+    if (![channelId, content, username].every(Boolean)) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    // Store web message
     if (!webMessages.has(channelId)) {
       webMessages.set(channelId, []);
     }
-    
     webMessages.get(channelId).push({
       username,
       content,
@@ -83,17 +80,20 @@ app.post("/send", async (req, res) => {
       avatar: "https://cdn.discordapp.com/embed/avatars/0.png"
     });
 
+    // Send to Discord
     const channel = await bot.channels.fetch(channelId);
-    await channel.send(`**${username}**: ${content}`);
+    await channel.send(`${username}: ${content}`);
     
     res.json({ success: true });
   } catch (error) {
-    console.error('POST /send error:', error);
-    res.status(500).json({ error: "Failed to send message" });
+    console.error('POST Error:', error);
+    res.status(500).json({ error: "Message failed to send" });
   }
 });
 
+// Health Check
 app.get("/health", (req, res) => res.sendStatus(200));
 
+// Server Start
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));
