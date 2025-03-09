@@ -1,5 +1,5 @@
 {
-  "name": "discord-chat-bot",
+  "name": "studyhall-chat",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
