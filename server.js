@@ -1,111 +1,99 @@
-const express = require("express");
-const { Client, GatewayIntentBits } = require("discord.js");
-const cors = require("cors");
+const express = require('express');
+const { Client, GatewayIntentBits } = require('discord.js');
+const cors = require('cors');
 
 const app = express();
 
-// ========== CORS CONFIGURATION ========== //
-const allowedOrigins = ["https://studyhall-help.netlify.app"];
+// CORS Configuration
+app.use(cors({
+  origin: 'https://studyhall-help.netlify.app',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
-  allowedHeaders: "Content-Type,Authorization",
-  credentials: true,
-  optionsSuccessStatus: 204
-};
-
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
-
-// ========== DISCORD BOT SETUP ========== //
+// Discord Client Configuration
 const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMessageHistory // Corrected intent name
+    GatewayIntentBits.GuildMessageHistory
   ]
 });
 
-// Bot connection handlers
-bot.on("ready", () => {
+// Bot Connection Handlers
+bot.on('ready', () => {
   console.log(`✅ Bot online as ${bot.user.tag}`);
-  console.log(`🌍 Serving ${bot.guilds.cache.size} servers`);
+  console.log(`🏫 Serving ${bot.guilds.cache.size} servers`);
 });
 
-bot.on("error", error => {
-  console.error("🔴 Discord client error:", error);
+bot.on('error', error => {
+  console.error('🔴 Critical Discord error:', error);
   process.exit(1);
 });
 
-// ========== APPLICATION LOGIC ========== //
-app.use(express.json());
+// Message Storage
+const messageCache = new Map();
+const CACHE_TTL = 3600000; // 1 hour
 
-// Message storage
-const messageStore = new Map();
-const MESSAGE_TTL = 3600000; // 1 hour
-
-app.get("/health", (req, res) => {
+// API Endpoints
+app.get('/health', (req, res) => {
   res.json({
-    status: "OK",
-    botStatus: bot.isReady() ? "online" : "offline"
+    status: 'OK',
+    botStatus: bot.isReady() ? 'online' : 'offline',
+    version: '1.0.0'
   });
 });
 
-app.get("/messages/:channelId", async (req, res) => {
+app.get('/messages/:channelId', async (req, res) => {
   try {
     const channel = await bot.channels.fetch(req.params.channelId);
     const messages = await channel.messages.fetch({ limit: 50 });
     
-    // Clean old messages
+    // Cache cleanup
     const now = Date.now();
-    const webMessages = (messageStore.get(req.params.channelId) || [])
-      .filter(msg => now - msg.timestamp < MESSAGE_TTL);
+    const cachedMessages = (messageCache.get(req.params.channelId) || [])
+      .filter(msg => now - msg.timestamp < CACHE_TTL);
     
-    messageStore.set(req.params.channelId, webMessages);
+    messageCache.set(req.params.channelId, cachedMessages);
 
     res.json([
-      ...webMessages,
-      ...Array.from(messages.values()).map(msg => ({
+      ...cachedMessages,
+      ...messages.map(msg => ({
+        id: msg.id,
         username: msg.author.username,
         content: msg.content,
-        avatar: msg.author.displayAvatarURL(),
+        avatar: msg.author.displayAvatarURL({ size: 256 }),
         timestamp: msg.createdTimestamp
       }))
     ].sort((a, b) => b.timestamp - a.timestamp));
   } catch (error) {
-    console.error("GET Error:", error.message);
+    console.error('GET Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post("/send", async (req, res) => {
+app.post('/send', async (req, res) => {
   try {
     const { channelId, content, username } = req.body;
     
+    // Validation
     if (!channelId || !content?.trim() || !username?.trim()) {
-      return res.status(400).json({ error: "Missing required fields" });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
     const channel = await bot.channels.fetch(channelId);
     
     // Store message
-    if (!messageStore.has(channelId)) {
-      messageStore.set(channelId, []);
+    if (!messageCache.has(channelId)) {
+      messageCache.set(channelId, []);
     }
     
-    messageStore.get(channelId).push({
+    messageCache.get(channelId).push({
       username: username.trim(),
       content: content.trim(),
       timestamp: Date.now(),
-      avatar: "https://cdn.discordapp.com/embed/avatars/0.png"
+      avatar: 'https://cdn.discordapp.com/embed/avatars/0.png'
     });
 
     // Send to Discord
@@ -113,12 +101,12 @@ app.post("/send", async (req, res) => {
     
     res.json({ success: true });
   } catch (error) {
-    console.error("POST Error:", error.message);
+    console.error('POST Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-// ========== SERVER START ========== //
+// Server Startup
 const PORT = process.env.PORT || 3000;
 
 bot.login(process.env.BOT_TOKEN)
@@ -128,6 +116,6 @@ bot.login(process.env.BOT_TOKEN)
     });
   })
   .catch(error => {
-    console.error("🔴 Bot login failed:", error);
+    console.error('🔴 Bot login failed:', error);
     process.exit(1);
   });
