@@ -16,10 +16,10 @@ const bot = new Client({
 
 bot.login(process.env.BOT_TOKEN);
 
-// In-memory user storage (for production, use a database)
+// In-memory user storage (for production, use a persistent database)
 const users = {};
 
-// Endpoint to register a new user
+// Register a new user
 app.post('/register', (req, res) => {
   try {
     const { username, password, profilePic } = req.body;
@@ -29,8 +29,12 @@ app.post('/register', (req, res) => {
     if (users[username]) {
       return res.status(400).json({ error: "Username already taken" });
     }
-    // In production, always hash passwords!
-    users[username] = { password, profilePic: profilePic || "https://cdn.discordapp.com/embed/avatars/1.png" };
+    // In production, hash passwords!
+    users[username] = { 
+      password, 
+      profilePic: profilePic || "https://cdn.discordapp.com/embed/avatars/1.png",
+      nickname: ""
+    };
     res.json({ success: true, message: "User registered successfully" });
   } catch (error) {
     console.error("Error in /register:", error);
@@ -38,7 +42,7 @@ app.post('/register', (req, res) => {
   }
 });
 
-// Endpoint to fetch a user's profile
+// Get user profile
 app.get('/user/:username', (req, res) => {
   try {
     const username = req.params.username;
@@ -46,14 +50,52 @@ app.get('/user/:username', (req, res) => {
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
-    res.json({ username, profilePic: user.profilePic });
+    res.json({ username, profilePic: user.profilePic, nickname: user.nickname });
   } catch (error) {
     console.error("Error in /user:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Message storage (for web messages)
+// Update user profile (username, password, profilePic, nickname)
+app.put('/user', (req, res) => {
+  try {
+    const { currentUsername, newUsername, newPassword, newProfilePic, newNickname } = req.body;
+    if (!users[currentUsername]) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    let updatedUsername = currentUsername;
+    if (newUsername && newUsername !== currentUsername) {
+      if (users[newUsername]) {
+        return res.status(400).json({ error: "Username already taken" });
+      }
+      // Move user data to new key
+      users[newUsername] = { ...users[currentUsername] };
+      delete users[currentUsername];
+      updatedUsername = newUsername;
+    }
+    if (newPassword) {
+      users[updatedUsername].password = newPassword;
+    }
+    if (newProfilePic) {
+      users[updatedUsername].profilePic = newProfilePic;
+    }
+    if (newNickname) {
+      users[updatedUsername].nickname = newNickname;
+    }
+    res.json({ 
+      success: true, 
+      username: updatedUsername, 
+      profilePic: users[updatedUsername].profilePic, 
+      nickname: users[updatedUsername].nickname 
+    });
+  } catch (error) {
+    console.error("Error in /user update:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Message storage for web messages
 const messageStore = new Map();
 
 // Fetch messages endpoint
@@ -62,7 +104,6 @@ app.get('/messages/:channelId', async (req, res) => {
     const channel = await bot.channels.fetch(req.params.channelId);
     const discordMessages = await channel.messages.fetch({ limit: 50 });
     
-    // Format Discord messages (ignore bot messages)
     const formattedDiscord = Array.from(discordMessages.values())
       .filter(msg => !msg.author.bot)
       .map(msg => ({
@@ -74,10 +115,7 @@ app.get('/messages/:channelId', async (req, res) => {
         source: 'discord'
       }));
 
-    // Get web messages stored on the server
     const webMessages = messageStore.get(req.params.channelId) || [];
-    
-    // Combine and sort messages by timestamp
     const allMessages = [
       ...webMessages,
       ...formattedDiscord
@@ -95,18 +133,16 @@ app.get('/messages/:channelId', async (req, res) => {
 app.post('/send', async (req, res) => {
   try {
     const { channelId, content, username } = req.body;
-    
     if (!channelId || !content || !username) {
       return res.status(400).json({ error: "Missing required fields" });
     }
     
-    // Look up the user's profile to get their avatar
+    // Use user's profile picture if available
     let avatarUrl = "https://cdn.discordapp.com/embed/avatars/0.png";
     if (users[username] && users[username].profilePic) {
       avatarUrl = users[username].profilePic;
     }
-
-    // Create the web message object
+    
     const newMessage = {
       id: `web-${Date.now()}`,
       username,
@@ -121,7 +157,6 @@ app.post('/send', async (req, res) => {
     }
     messageStore.get(channelId).push(newMessage);
 
-    // Send the message to Discord as well
     const channel = await bot.channels.fetch(channelId);
     await channel.send(`${username}: ${content}`);
     
