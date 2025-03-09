@@ -2,6 +2,7 @@ const express = require('express');
 const { Client, GatewayIntentBits } = require('discord.js');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const fs = require('fs'); // File system module to read and write to a file
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -20,8 +21,25 @@ const bot = new Client({
 
 bot.login(process.env.BOT_TOKEN);
 
-// In-memory user storage (use a real database for production)
-const users = {};
+// File path for storing user data
+const usersFilePath = './users.json';
+
+// Function to load users from the JSON file
+const loadUsers = () => {
+  try {
+    const data = fs.readFileSync(usersFilePath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    return {};  // Return an empty object if file doesn't exist or can't be read
+  }
+};
+
+// Function to save users to the JSON file
+const saveUsers = (users) => {
+  fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2)); // Save formatted JSON data to the file
+};
+
+let users = loadUsers(); // Load users at the start of the application
 
 // ** REGISTER a New User **
 app.post('/register', (req, res) => {
@@ -42,6 +60,8 @@ app.post('/register', (req, res) => {
       profilePic: profilePic || "https://cdn.discordapp.com/embed/avatars/1.png",
       nickname: ""  // Nickname starts empty
     };
+
+    saveUsers(users); // Save users to the JSON file
 
     res.json({ success: true, message: "User registered successfully" });
   } catch (error) {
@@ -131,11 +151,13 @@ app.put('/user', (req, res) => {
       users[updatedUsername].nickname = newNickname;
     }
 
+    saveUsers(users); // Save updated users to the JSON file
+
     res.json({ 
       success: true, 
       username: updatedUsername, 
       profilePic: users[updatedUsername].profilePic, 
-      nickname: users[updatedUsername].nickname || updatedUsername // Return nickname if set, else use updated username
+      nickname: users[updatedUsername].nickname || updatedUsername // Return nickname if set, else updated username
     });
 
   } catch (error) {
