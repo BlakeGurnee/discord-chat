@@ -2,7 +2,7 @@ const express = require('express');
 const { Client, GatewayIntentBits } = require('discord.js');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const fs = require('fs'); // File system module to read and write to a file
+const mongoose = require('mongoose'); // Mongoose for MongoDB
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -21,28 +21,23 @@ const bot = new Client({
 
 bot.login(process.env.BOT_TOKEN);
 
-// File path for storing user data
-const usersFilePath = './users.json';
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('MongoDB connected'))
+  .catch((err) => console.error('MongoDB connection error:', err));
 
-// Function to load users from the JSON file
-const loadUsers = () => {
-  try {
-    const data = fs.readFileSync(usersFilePath, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    return {};  // Return an empty object if file doesn't exist or can't be read
-  }
-};
+// Define User Schema for MongoDB
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  profilePic: { type: String, default: "https://cdn.discordapp.com/embed/avatars/1.png" },
+  nickname: { type: String, default: "" }
+});
 
-// Function to save users to the JSON file
-const saveUsers = (users) => {
-  fs.writeFileSync(usersFilePath, JSON.stringify(users, null, 2)); // Save formatted JSON data to the file
-};
-
-let users = loadUsers(); // Load users at the start of the application
+const User = mongoose.model('User', userSchema);
 
 // ** REGISTER a New User **
-app.post('/register', (req, res) => {
+app.post('/register', async (req, res) => {
   try {
     const { username, password, profilePic } = req.body;
 
@@ -50,19 +45,18 @@ app.post('/register', (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    if (users[username]) {
+    const existingUser = await User.findOne({ username });
+    if (existingUser) {
       return res.status(400).json({ error: "Username already taken" });
     }
 
-    // Store the user (hash passwords in production!)
-    users[username] = { 
-      password, 
-      profilePic: profilePic || "https://cdn.discordapp.com/embed/avatars/1.png",
-      nickname: ""  // Nickname starts empty
-    };
+    const user = new User({
+      username,
+      password,
+      profilePic: profilePic || "https://cdn.discordapp.com/embed/avatars/1.png"
+    });
 
-    saveUsers(users); // Save users to the JSON file
-
+    await user.save(); // Save user to MongoDB
     res.json({ success: true, message: "User registered successfully" });
   } catch (error) {
     console.error("Error in /register:", error);
@@ -71,22 +65,23 @@ app.post('/register', (req, res) => {
 });
 
 // ** LOGIN User **
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    if (!users[username]) {
+    const user = await User.findOne({ username });
+    if (!user) {
       return res.status(400).json({ error: "Account not found" });
     }
 
-    if (users[username].password !== password) {
+    if (user.password !== password) {
       return res.status(400).json({ error: "Incorrect password" });
     }
 
-    res.json({ 
-      username, 
-      profilePic: users[username].profilePic, 
-      nickname: users[username].nickname || username // Return the nickname or username if not set
+    res.json({
+      username: user.username,
+      profilePic: user.profilePic,
+      nickname: user.nickname || user.username // Return the nickname or username if not set
     });
 
   } catch (error) {
@@ -96,19 +91,18 @@ app.post('/login', (req, res) => {
 });
 
 // ** GET User Profile **
-app.get('/user/:username', (req, res) => {
+app.get('/user/:username', async (req, res) => {
   try {
     const username = req.params.username;
-    const user = users[username];
+    const user = await User.findOne({ username });
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Show nickname if set, otherwise use username
-    res.json({ 
-      username: user.nickname || username, 
-      profilePic: user.profilePic, 
+    res.json({
+      username: user.nickname || username,
+      profilePic: user.profilePic,
       nickname: user.nickname || username // Return nickname if set, else username
     });
 
@@ -119,45 +113,34 @@ app.get('/user/:username', (req, res) => {
 });
 
 // ** UPDATE User Profile (username, password, profilePic, nickname) **
-app.put('/user', (req, res) => {
+app.put('/user', async (req, res) => {
   try {
     const { currentUsername, newUsername, newPassword, newProfilePic, newNickname } = req.body;
 
-    if (!users[currentUsername]) {
+    const user = await User.findOne({ username: currentUsername });
+    if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    let updatedUsername = currentUsername;
-
     if (newUsername && newUsername !== currentUsername) {
-      if (users[newUsername]) {
+      const existingUser = await User.findOne({ username: newUsername });
+      if (existingUser) {
         return res.status(400).json({ error: "Username already taken" });
       }
-      // Move user data to new key
-      users[newUsername] = { ...users[currentUsername] };
-      delete users[currentUsername];
-      updatedUsername = newUsername;
+      user.username = newUsername;
     }
 
-    if (newPassword) {
-      users[updatedUsername].password = newPassword;
-    }
+    if (newPassword) user.password = newPassword;
+    if (newProfilePic) user.profilePic = newProfilePic;
+    if (newNickname) user.nickname = newNickname;
 
-    if (newProfilePic) {
-      users[updatedUsername].profilePic = newProfilePic;
-    }
+    await user.save(); // Save the updated user to MongoDB
 
-    if (newNickname) {
-      users[updatedUsername].nickname = newNickname;
-    }
-
-    saveUsers(users); // Save updated users to the JSON file
-
-    res.json({ 
-      success: true, 
-      username: updatedUsername, 
-      profilePic: users[updatedUsername].profilePic, 
-      nickname: users[updatedUsername].nickname || updatedUsername // Return nickname if set, else updated username
+    res.json({
+      success: true,
+      username: user.username,
+      profilePic: user.profilePic,
+      nickname: user.nickname || user.username
     });
 
   } catch (error) {
@@ -175,7 +158,6 @@ app.get('/messages/:channelId', async (req, res) => {
     const channel = await bot.channels.fetch(req.params.channelId);
     const discordMessages = await channel.messages.fetch({ limit: 50 });
 
-    // Format Discord messages (ignoring bot messages)
     const formattedDiscord = Array.from(discordMessages.values())
       .filter(msg => !msg.author.bot)
       .map(msg => ({
@@ -206,14 +188,13 @@ app.post('/send', async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Look up the user's profile to get the correct avatar and nickname
     let avatarUrl = "https://cdn.discordapp.com/embed/avatars/0.png";
-    let displayName = username;  // Default to username
-    if (users[username] && users[username].profilePic) {
-      avatarUrl = users[username].profilePic;
-    }
-    if (users[username] && users[username].nickname) {
-      displayName = users[username].nickname;  // Use nickname if set
+    let displayName = username;
+    const user = await User.findOne({ username });
+
+    if (user) {
+      avatarUrl = user.profilePic;
+      displayName = user.nickname || username;
     }
 
     const newMessage = {
@@ -237,15 +218,6 @@ app.post('/send', async (req, res) => {
   } catch (error) {
     console.error("Error in /send:", error);
     res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/view-users', (req, res) => {
-  try {
-    const users = loadUsers();
-    res.json(users); // Return the entire contents of users.json
-  } catch (error) {
-    res.status(500).json({ error: 'Error reading users data' });
   }
 });
 
