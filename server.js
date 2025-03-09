@@ -3,47 +3,64 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const cors = require('cors');
 
 const app = express();
-app.use(cors({ origin: '*' })); // Temporarily allow all origins for debugging
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageTyping
   ]
 });
 
 bot.login(process.env.BOT_TOKEN);
 
-// Message storage
-const webMessages = new Map();
+// Message storage with deletion tracking
+const messageStore = new Map();
+
+// Handle message deletions
+bot.on('messageDelete', async (deletedMessage) => {
+  try {
+    const channelId = deletedMessage.channel.id;
+    if (messageStore.has(channelId)) {
+      const filtered = messageStore.get(channelId).filter(msg => 
+        msg.discordId !== deletedMessage.id
+      );
+      messageStore.set(channelId, filtered);
+    }
+  } catch (error) {
+    console.error('Error handling message delete:', error);
+  }
+});
 
 app.get('/messages/:channelId', async (req, res) => {
   try {
-    console.log(`Fetching messages for channel ${req.params.channelId}`);
-    
     const channel = await bot.channels.fetch(req.params.channelId);
     const discordMessages = await channel.messages.fetch({ limit: 50 });
     
+    // Filter out bot messages and transform
     const formattedDiscord = Array.from(discordMessages.values())
       .filter(msg => !msg.author.bot)
       .map(msg => ({
+        id: msg.id,
         username: msg.author.username,
         content: msg.content,
         avatar: msg.author.displayAvatarURL(),
-        origin: 'discord',
-        timestamp: msg.createdTimestamp
+        timestamp: msg.createdTimestamp,
+        source: 'discord'
       }));
 
-    const webMessagesForChannel = webMessages.get(req.params.channelId) || [];
+    // Get web messages
+    const webMessages = messageStore.get(req.params.channelId) || [];
     
+    // Combine and sort messages
     const allMessages = [
-      ...webMessagesForChannel,
+      ...webMessages,
       ...formattedDiscord
-    ].sort((a, b) => b.timestamp - a.timestamp);
+    ].sort((a, b) => a.timestamp - b.timestamp);
 
-    console.log(`Returning ${allMessages.length} messages`);
     res.json(allMessages);
     
   } catch (error) {
@@ -54,7 +71,6 @@ app.get('/messages/:channelId', async (req, res) => {
 
 app.post('/send', async (req, res) => {
   try {
-    console.log("Received message:", req.body);
     const { channelId, content, username } = req.body;
     
     if (!channelId || !content || !username) {
@@ -62,18 +78,23 @@ app.post('/send', async (req, res) => {
     }
 
     // Store web message
-    if (!webMessages.has(channelId)) webMessages.set(channelId, []);
-    webMessages.get(channelId).push({
+    const newMessage = {
+      id: `web-${Date.now()}`,
       username,
       content,
-      origin: 'web',
+      avatar: "https://cdn.discordapp.com/embed/avatars/0.png",
       timestamp: Date.now(),
-      avatar: "https://cdn.discordapp.com/embed/avatars/0.png"
-    });
+      source: 'web'
+    };
+
+    if (!messageStore.has(channelId)) {
+      messageStore.set(channelId, []);
+    }
+    messageStore.get(channelId).push(newMessage);
 
     // Send to Discord
     const channel = await bot.channels.fetch(channelId);
-    await channel.send(`**${username}**: ${content}`);
+    await channel.send(`${username}: ${content}`);
     
     res.json({ success: true });
     
